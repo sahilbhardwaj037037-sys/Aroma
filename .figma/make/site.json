@@ -1,0 +1,11 @@
+{
+  "title": "Noctis — Maison Aurore",
+  "description": "A nocturnal luxury perfume composition from Maison Aurore. Black rose, aged oud, and sea ambergris.",
+  "language": "en",
+  "icons": {
+    "icon": "/favicon.ico"
+  },
+  "openGraph": {
+    "image": "https://images.unsplash.com/photo-1563170351-be82bc888aa4?w=1200&h=630&fit=crop"
+  }
+}

@@ -1,0 +1,1175 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+/* ─── Types ─── */
+interface MousePos { x: number; y: number; }
+
+/* ─── Lerp utility ─── */
+const lerp = (a: number, b: number, t: number) => a + (b - a) * Math.max(0, Math.min(1, t));
+const lerpColor = (c1: [number,number,number], c2: [number,number,number], t: number): string => {
+  const r = Math.round(lerp(c1[0], c2[0], t));
+  const g = Math.round(lerp(c1[1], c2[1], t));
+  const b = Math.round(lerp(c1[2], c2[2], t));
+  return `rgb(${r},${g},${b})`;
+};
+
+/* ─── Chapter definitions ─── */
+const CHAPTERS = [
+  {
+    label: "I",
+    title: "The Opening",
+    subtitle: "Black Pepper · Bergamot · Cardamom",
+    body: "The very first breath of Noctis arrives like a sudden cold — electric, sharp, and completely alive. Black pepper from Madagascar ignites, Calabrian bergamot softens the shock, cardamom holds them together. It lasts only minutes. Enough to change everything.",
+    tag: "TOP NOTES · 0–15 MIN",
+    liquidLevel: 0.15,
+    liquidColorA: [80, 50, 20] as [number,number,number],
+    liquidColorB: [120, 80, 40] as [number,number,number],
+    glowColor: [180, 140, 80] as [number,number,number],
+    glowOpacity: 0.12,
+    rotateY: -8,
+    capLift: 0,
+    particleType: "pepper",
+  },
+  {
+    label: "II",
+    title: "The Rose",
+    subtitle: "Midnight Rose · Orris Root",
+    body: "At midnight in the Bulgarian Rose Valley, the blooms are cut while still cold with dew. This is the heart of Noctis — a rose that refuses to be pretty. Dark, dewy, slightly decaying at the edges. Orris root adds a powdery violet warmth that feels like skin.",
+    tag: "HEART NOTES · 15–60 MIN",
+    liquidLevel: 0.45,
+    liquidColorA: [140, 50, 70] as [number,number,number],
+    liquidColorB: [80, 20, 40] as [number,number,number],
+    glowColor: [180, 80, 100] as [number,number,number],
+    glowOpacity: 0.16,
+    rotateY: 4,
+    capLift: 0,
+    particleType: "rose",
+  },
+  {
+    label: "III",
+    title: "The Oud",
+    subtitle: "Laotian Oud · Vetiver",
+    body: "Ancient aquilaria wood, infected by a rare mold over centuries, producing one of the most complex materials in perfumery. The oud in Noctis comes from Laos — smoky, leathery, medicinal, and profound. Haitian vetiver anchors it to the earth. This is where Noctis stops being a perfume and becomes a place.",
+    tag: "HEART NOTES · 60–180 MIN",
+    liquidLevel: 0.72,
+    liquidColorA: [100, 55, 15] as [number,number,number],
+    liquidColorB: [60, 30, 8] as [number,number,number],
+    glowColor: [160, 100, 30] as [number,number,number],
+    glowOpacity: 0.2,
+    rotateY: 14,
+    capLift: 0,
+    particleType: "oud",
+  },
+  {
+    label: "IV",
+    title: "The Wait",
+    subtitle: "12 Months · Sealed in Ceramic",
+    body: "The accord macerates for exactly twelve months in century-old ceramic vessels in our Grasse atelier. No shortcuts. No acceleration. Perfumer Élise Varnay checks it once, on the one-year anniversary, and decides — without alteration — whether it is ready.",
+    tag: "MACERATION · 365 DAYS",
+    liquidLevel: 0.92,
+    liquidColorA: [180, 130, 50] as [number,number,number],
+    liquidColorB: [140, 90, 30] as [number,number,number],
+    glowColor: [201, 169, 110] as [number,number,number],
+    glowOpacity: 0.28,
+    rotateY: 0,
+    capLift: 0,
+    particleType: "none",
+  },
+  {
+    label: "V",
+    title: "Noctis",
+    subtitle: "Ambergris · Sandalwood · The Night",
+    body: "The finish. Mysore sandalwood — creamy, honeyed — meets Atlantic ambergris, that legendary oceanic fixative that clings to skin for hours, even days. This is Noctis complete: the darkness you carry home with you long after the night has ended.",
+    tag: "BASE NOTES · 3–12 HOURS",
+    liquidLevel: 1,
+    liquidColorA: [201, 169, 110] as [number,number,number],
+    liquidColorB: [160, 120, 60] as [number,number,number],
+    glowColor: [232, 201, 138] as [number,number,number],
+    glowOpacity: 0.35,
+    rotateY: -6,
+    capLift: 0,
+    particleType: "gold",
+  },
+];
+
+/* ─── Dynamic Bottle SVG ─── */
+interface BottleProps {
+  tilt?: { x: number; y: number };
+  liquidLevel?: number;
+  liquidColorA?: [number,number,number];
+  liquidColorB?: [number,number,number];
+  glowColor?: [number,number,number];
+  glowOpacity?: number;
+  rotateY?: number;
+  particles?: string;
+  scale?: number;
+}
+
+function BottleSVG({
+  tilt = { x: 0, y: 0 },
+  liquidLevel = 0.85,
+  liquidColorA = [201, 169, 110],
+  liquidColorB = [122, 80, 48],
+  glowColor = [201, 169, 110],
+  glowOpacity = 0.15,
+  rotateY = 0,
+  particles = "none",
+  scale = 1,
+}: BottleProps) {
+  const bottleTop = 165;
+  const bottleBottom = 405;
+  const fillHeight = (bottleBottom - bottleTop) * liquidLevel;
+  const fillY = bottleBottom - fillHeight;
+
+  const liquidA = `rgba(${liquidColorA[0]},${liquidColorA[1]},${liquidColorA[2]},0.7)`;
+  const liquidB = `rgba(${liquidColorB[0]},${liquidColorB[1]},${liquidColorB[2]},0.35)`;
+  const glowRgb = `${glowColor[0]},${glowColor[1]},${glowColor[2]}`;
+
+  const totalRotY = tilt.x * 12 + rotateY;
+  const totalRotX = -tilt.y * 8;
+
+  return (
+    <svg
+      viewBox="0 0 240 440"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{
+        transform: `perspective(1000px) rotateY(${totalRotY}deg) rotateX(${totalRotX}deg) scale(${scale})`,
+        transition: "transform 0.15s ease-out",
+        width: "100%",
+        filter: `drop-shadow(0 0 50px rgba(${glowRgb},${glowOpacity * 0.8})) drop-shadow(0 0 100px rgba(${glowRgb},${glowOpacity * 0.5}))`,
+      }}
+    >
+      <defs>
+        <linearGradient id="sb-body" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#0d0b08" />
+          <stop offset="15%" stopColor="#1e1810" />
+          <stop offset="38%" stopColor={`rgba(${glowRgb},0.35)`} />
+          <stop offset="55%" stopColor={`rgba(${glowRgb},0.25)`} />
+          <stop offset="78%" stopColor="#1e1810" />
+          <stop offset="100%" stopColor="#080706" />
+        </linearGradient>
+        <linearGradient id="sb-liquid" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor={liquidA} />
+          <stop offset="100%" stopColor={liquidB} />
+        </linearGradient>
+        <linearGradient id="sb-neck" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#0d0b08" />
+          <stop offset="30%" stopColor={`rgba(${glowRgb},0.3)`} />
+          <stop offset="70%" stopColor={`rgba(${glowRgb},0.2)`} />
+          <stop offset="100%" stopColor="#080706" />
+        </linearGradient>
+        <linearGradient id="sb-cap" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor={`rgba(${glowRgb},1)`} />
+          <stop offset="50%" stopColor={`rgba(${Math.min(255,glowColor[0]+40)},${Math.min(255,glowColor[1]+35)},${Math.min(255,glowColor[2]+30)},1)`} />
+          <stop offset="100%" stopColor={`rgba(${Math.round(glowColor[0]*0.55)},${Math.round(glowColor[1]*0.55)},${Math.round(glowColor[2]*0.55)},1)`} />
+        </linearGradient>
+        <radialGradient id="sb-reflect" cx="28%" cy="18%" r="55%">
+          <stop offset="0%" stopColor={`rgba(${glowRgb},0.28)`} />
+          <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+        </radialGradient>
+        <radialGradient id="sb-inner-glow" cx="50%" cy="60%" r="50%">
+          <stop offset="0%" stopColor={`rgba(${glowRgb},0.18)`} />
+          <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+        </radialGradient>
+        <filter id="sb-glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="2.5" result="blur" />
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <clipPath id="sb-bottle-clip">
+          <path d="M 54 163 C 52 182 48 202 46 232 C 44 268 44 304 46 334 C 48 364 55 383 65 395 C 75 406 90 411 120 411 C 150 411 165 406 175 395 C 185 383 192 364 194 334 C 196 304 196 268 194 232 C 192 202 188 182 186 163 Z" />
+        </clipPath>
+      </defs>
+
+      <ellipse cx="120" cy="430" rx="58" ry="5" fill="rgba(0,0,0,0.45)" />
+
+      <path
+        d="M 54 163 C 52 182 48 202 46 232 C 44 268 44 304 46 334 C 48 364 55 383 65 395 C 75 406 90 411 120 411 C 150 411 165 406 175 395 C 185 383 192 364 194 334 C 196 304 196 268 194 232 C 192 202 188 182 186 163 Z"
+        fill="url(#sb-body)"
+        stroke={`rgba(${glowRgb},0.18)`}
+        strokeWidth="1"
+      />
+
+      {liquidLevel > 0.01 && (
+        <g clipPath="url(#sb-bottle-clip)">
+          <rect
+            x="46" y={fillY} width="148" height={fillHeight + 2}
+            fill="url(#sb-liquid)"
+            style={{ transition: "y 0.6s cubic-bezier(0.22,1,0.36,1), height 0.6s cubic-bezier(0.22,1,0.36,1)" }}
+          />
+          <ellipse
+            cx="120" cy={fillY}
+            rx="72" ry="5"
+            fill={liquidA}
+            style={{ transition: "cy 0.6s cubic-bezier(0.22,1,0.36,1)" }}
+          />
+          <ellipse
+            cx="95" cy={fillY + 12}
+            rx="18" ry="3"
+            fill={`rgba(${glowRgb},0.25)`}
+          />
+        </g>
+      )}
+
+      <path
+        d="M 54 163 C 52 182 48 202 46 232 C 44 268 44 304 46 334 C 48 364 55 383 65 395 C 75 406 90 411 120 411 C 150 411 165 406 175 395 C 185 383 192 364 194 334 C 196 304 196 268 194 232 C 192 202 188 182 186 163 Z"
+        fill="url(#sb-inner-glow)"
+      />
+
+      <path
+        d="M 54 163 C 52 182 48 202 46 232 C 44 268 44 304 46 334 C 48 364 55 383 65 395 C 75 406 90 411 120 411 C 150 411 165 406 175 395 C 185 383 192 364 194 334 C 196 304 196 268 194 232 C 192 202 188 182 186 163 Z"
+        fill="url(#sb-reflect)"
+      />
+
+      <line x1="54" y1="165" x2="54" y2="393" stroke={`rgba(${glowRgb},0.3)`} strokeWidth="1.8" filter="url(#sb-glow)" />
+
+      <rect x="88" y="110" width="64" height="56" rx="3" fill="url(#sb-neck)" stroke={`rgba(${glowRgb},0.12)`} strokeWidth="1" />
+      <path d="M 54 163 Q 88 155 88 163 L 152 163 Q 152 155 186 163 Z" fill={`rgba(${glowRgb},0.07)`} />
+
+      <rect x="92" y="58" width="56" height="54" rx="3" fill="url(#sb-cap)" />
+      <rect x="94" y="60" width="26" height="50" rx="2" fill="rgba(255,255,255,0.07)" />
+      <rect x="90" y="104" width="60" height="7" rx="1" fill={`rgba(${glowRgb},0.75)`} />
+      <rect x="90" y="109" width="60" height="2" fill="rgba(255,255,255,0.12)" />
+      <rect x="96" y="50" width="48" height="12" rx="2" fill={`rgba(${glowRgb},0.9)`} />
+      <rect x="112" y="42" width="16" height="12" rx="1" fill={`rgba(${glowRgb},0.8)`} />
+
+      <rect x="68" y="234" width="104" height="82" rx="1" fill="transparent" stroke={`rgba(${glowRgb},0.15)`} strokeWidth="0.5" />
+      <line x1="72" y1="248" x2="168" y2="248" stroke={`rgba(${glowRgb},0.1)`} strokeWidth="0.5" />
+      <line x1="72" y1="304" x2="168" y2="304" stroke={`rgba(${glowRgb},0.1)`} strokeWidth="0.5" />
+      <text x="120" y="272" textAnchor="middle" fill={`rgba(${glowRgb},0.7)`} fontSize="9" fontFamily="'Playfair Display', serif" letterSpacing="3" fontStyle="italic">NOCTIS</text>
+      <text x="120" y="288" textAnchor="middle" fill={`rgba(${glowRgb},0.4)`} fontSize="5.5" fontFamily="'Space Mono', monospace" letterSpacing="4">MAISON AURORE</text>
+      <text x="120" y="299" textAnchor="middle" fill={`rgba(${glowRgb},0.28)`} fontSize="4.5" fontFamily="'Space Mono', monospace" letterSpacing="3">PARIS · 50 ML</text>
+
+      {particles === "pepper" && (
+        <g opacity="0.55">
+          {[[36, 190, 3.5], [198, 210, 2.5], [30, 280, 2], [205, 320, 3], [42, 370, 2.5]].map(([x, y, r], i) => (
+            <circle key={i} cx={x} cy={y} r={r} fill={`rgba(${glowRgb},0.6)`} />
+          ))}
+        </g>
+      )}
+      {particles === "rose" && (
+        <g opacity="0.4">
+          {[[35, 200], [202, 230], [28, 310], [208, 280], [40, 380]].map(([x, y], i) => (
+            <ellipse key={i} cx={x} cy={y} rx={6} ry={3} fill={`rgba(180,70,90,0.5)`} transform={`rotate(${i * 36} ${x} ${y})`} />
+          ))}
+        </g>
+      )}
+      {particles === "oud" && (
+        <g opacity="0.35">
+          {[[32, 220, 4, 2], [204, 260, 6, 2], [30, 330, 5, 3], [206, 370, 4, 2]].map(([x, y, w, h], i) => (
+            <rect key={i} x={x} y={y} width={w} height={h} fill={`rgba(120,70,20,0.6)`} transform={`rotate(${i * 20} ${x} ${y})`} />
+          ))}
+        </g>
+      )}
+      {particles === "gold" && (
+        <g>
+          {[[34, 195, 1.5], [202, 215, 1], [26, 285, 2], [208, 305, 1.5], [36, 365, 1], [206, 390, 2]].map(([x, y, r], i) => (
+            <circle key={i} cx={x} cy={y} r={r} fill={`rgba(${glowRgb},0.9)`} filter="url(#sb-glow)" />
+          ))}
+        </g>
+      )}
+    </svg>
+  );
+}
+
+/* ─── Cursor ─── */
+function Cursor({ pos, hovered }: { pos: MousePos; hovered: boolean }) {
+  const ringRef = useRef<HTMLDivElement>(null);
+  const ringPos = useRef({ x: pos.x, y: pos.y });
+  const raf = useRef<number>(0);
+  const [isTouch, setIsTouch] = useState(false);
+
+  useEffect(() => {
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+      setIsTouch(true);
+    }
+  }, []);
+
+  if (isTouch) return null;
+
+  useEffect(() => {
+    const animate = () => {
+      ringPos.current.x += (pos.x - ringPos.current.x) * 0.12;
+      ringPos.current.y += (pos.y - ringPos.current.y) * 0.12;
+      if (ringRef.current) {
+        ringRef.current.style.left = ringPos.current.x + "px";
+        ringRef.current.style.top = ringPos.current.y + "px";
+      }
+      raf.current = requestAnimationFrame(animate);
+    };
+    raf.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf.current);
+  }, [pos]);
+
+  return (
+    <>
+      <div className="cursor-dot" style={{ left: pos.x, top: pos.y }} />
+      <div ref={ringRef} className={`cursor-ring ${hovered ? "cursor-hover" : ""}`} />
+    </>
+  );
+}
+
+/* ─── Marquee ─── */
+function Marquee() {
+  const items = ["NOCTIS · MAISON AURORE", "PARIS", "50 ML EAU DE PARFUM", "COLLECTION NUIT", "HANDCRAFTED", "SINCE 1923"];
+  const text = [...items, ...items].join("   ·   ");
+  return (
+    <div className="overflow-hidden border-t border-b py-3" style={{ borderColor: "var(--border)" }}>
+      <div className="marquee-inner inline-block">
+        <span className="font-mono-label text-xs tracking-widest" style={{ color: "var(--gold-dim)", fontSize: "0.62rem" }}>
+          {text}{"   ·   "}{text}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Scroll Story Section ─── */
+function ScrollStory({ mouse }: { mouse: MousePos }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [progress, setProgress] = useState(0);
+  const [chapterIdx, setChapterIdx] = useState(0);
+  const [chapterProgress, setChapterProgress] = useState(0);
+  const [prevChapter, setPrevChapter] = useState(0);
+  const [textVisible, setTextVisible] = useState(true);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const stickyEl = containerRef.current?.querySelector(".sticky-scene") as HTMLElement | null;
+    if (!stickyEl) return;
+    const rect = stickyEl.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    setTilt({
+      x: (mouse.x - cx) / (window.innerWidth / 2) * 0.4,
+      y: (mouse.y - cy) / (window.innerHeight / 2) * 0.3,
+    });
+  }, [mouse]);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const totalHeight = el.offsetHeight - window.innerHeight;
+      const scrolled = -rect.top;
+      const raw = Math.max(0, Math.min(1, scrolled / totalHeight));
+      setProgress(raw);
+
+      const total = CHAPTERS.length;
+      const chunkSize = 1 / total;
+      const idx = Math.min(total - 1, Math.floor(raw / chunkSize));
+      const cProgress = (raw - idx * chunkSize) / chunkSize;
+
+      if (idx !== chapterIdx) {
+        setTextVisible(false);
+        const prev = chapterIdx;
+        setPrevChapter(prev);
+        setTimeout(() => {
+          setChapterIdx(idx);
+          setTextVisible(true);
+        }, 260);
+      }
+      setChapterProgress(cProgress);
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [chapterIdx]);
+
+  const ch = CHAPTERS[chapterIdx];
+  const nextCh = CHAPTERS[Math.min(CHAPTERS.length - 1, chapterIdx + 1)];
+
+  const eased = chapterProgress < 0.5
+    ? 2 * chapterProgress * chapterProgress
+    : 1 - Math.pow(-2 * chapterProgress + 2, 2) / 2;
+
+  const liquidLevel = lerp(ch.liquidLevel, nextCh.liquidLevel, eased);
+  const liquidColorA = [
+    lerp(ch.liquidColorA[0], nextCh.liquidColorA[0], eased),
+    lerp(ch.liquidColorA[1], nextCh.liquidColorA[1], eased),
+    lerp(ch.liquidColorA[2], nextCh.liquidColorA[2], eased),
+  ] as [number,number,number];
+  const liquidColorB = [
+    lerp(ch.liquidColorB[0], nextCh.liquidColorB[0], eased),
+    lerp(ch.liquidColorB[1], nextCh.liquidColorB[1], eased),
+    lerp(ch.liquidColorB[2], nextCh.liquidColorB[2], eased),
+  ] as [number,number,number];
+  const glowColor = [
+    lerp(ch.glowColor[0], nextCh.glowColor[0], eased),
+    lerp(ch.glowColor[1], nextCh.glowColor[1], eased),
+    lerp(ch.glowColor[2], nextCh.glowColor[2], eased),
+  ] as [number,number,number];
+  const glowOpacity = lerp(ch.glowOpacity, nextCh.glowOpacity, eased);
+  const rotateY = lerp(ch.rotateY, nextCh.rotateY, eased);
+  const glowRgb = `${Math.round(glowColor[0])},${Math.round(glowColor[1])},${Math.round(glowColor[2])}`;
+  const bottleOpacity = progress < 0.02 ? progress / 0.02 : 1;
+
+  return (
+    <section
+      ref={containerRef}
+      id="scroll-story"
+      style={{ height: `${CHAPTERS.length * 130}vh`, position: "relative" }}
+    >
+      <div
+        className="sticky-scene"
+        style={{
+          position: "sticky",
+          top: 0,
+          height: "100vh",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "stretch",
+          background: "var(--bg)",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: `radial-gradient(ellipse 60% 70% at 60% 50%, rgba(${glowRgb},${glowOpacity * 0.35}) 0%, transparent 70%)`,
+            transition: "background 1.2s ease",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: `radial-gradient(ellipse 40% 50% at 35% 70%, rgba(${glowRgb},${glowOpacity * 0.15}) 0%, transparent 70%)`,
+            transition: "background 1.2s ease",
+            pointerEvents: "none",
+          }}
+        />
+
+        <div
+          style={{
+            position: "absolute",
+            right: 32,
+            top: "50%",
+            transform: "translateY(-50%)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            zIndex: 10,
+          }}
+        >
+          {CHAPTERS.map((c, i) => (
+            <div
+              key={c.label}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexDirection: "row-reverse",
+              }}
+            >
+              <div
+                style={{
+                  width: i === chapterIdx ? 6 : 4,
+                  height: i === chapterIdx ? 6 : 4,
+                  borderRadius: "50%",
+                  background: i === chapterIdx ? `rgba(${glowRgb},1)` : `rgba(${glowRgb},0.25)`,
+                  boxShadow: i === chapterIdx ? `0 0 10px rgba(${glowRgb},0.8)` : "none",
+                  transition: "all 0.4s",
+                }}
+              />
+              {i === chapterIdx && (
+                <span
+                  className="font-mono-label"
+                  style={{ fontSize: "0.5rem", color: `rgba(${glowRgb},0.6)`, letterSpacing: "0.12em" }}
+                >
+                  {c.label}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            position: "absolute",
+            left: 32,
+            top: "20%",
+            height: "60%",
+            width: 1,
+            background: "var(--border)",
+            zIndex: 10,
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: `${progress * 100}%`,
+              background: `rgba(${glowRgb},0.7)`,
+              transition: "height 0.1s linear, background 0.8s ease",
+            }}
+          />
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            width: "100%",
+            height: "100%",
+            paddingLeft: 72,
+            paddingRight: 64,
+            alignItems: "center",
+            gap: 40,
+          }}
+        >
+          <div style={{ paddingRight: 24 }}>
+            <div style={{ marginBottom: 28 }}>
+              <span
+                className="font-display"
+                style={{
+                  fontSize: "clamp(5rem, 10vw, 9rem)",
+                  color: `rgba(${glowRgb},0.06)`,
+                  lineHeight: 1,
+                  display: "block",
+                  transition: "color 1.2s ease",
+                  userSelect: "none",
+                }}
+              >
+                {ch.label}
+              </span>
+            </div>
+
+            <div
+              style={{
+                opacity: textVisible ? 1 : 0,
+                transform: textVisible ? "translateY(0)" : "translateY(20px)",
+                transition: "opacity 0.5s cubic-bezier(0.22,1,0.36,1), transform 0.5s cubic-bezier(0.22,1,0.36,1)",
+              }}
+            >
+              <p
+                className="font-mono-label"
+                style={{ fontSize: "0.6rem", color: `rgba(${glowRgb},0.7)`, letterSpacing: "0.2em", marginBottom: 20, transition: "color 1.2s ease" }}
+              >
+                {ch.tag}
+              </p>
+
+              <h2
+                className="font-display"
+                style={{ fontSize: "clamp(2rem, 3.5vw, 3.2rem)", color: "var(--fg)", lineHeight: 1.2, marginBottom: 10 }}
+              >
+                {ch.title}
+              </h2>
+              <p
+                className="font-display italic"
+                style={{ fontSize: "clamp(0.85rem, 1.2vw, 1rem)", color: `rgba(${glowRgb},0.65)`, marginBottom: 28, transition: "color 1.2s ease" }}
+              >
+                {ch.subtitle}
+              </p>
+
+              <hr style={{ border: "none", height: 1, background: `rgba(${glowRgb},0.2)`, maxWidth: 60, marginBottom: 28, transition: "background 1.2s ease" }} />
+
+              <p
+                className="font-light"
+                style={{ color: "var(--fg-muted)", lineHeight: 1.9, fontSize: "clamp(0.82rem, 1vw, 0.92rem)", maxWidth: 380 }}
+              >
+                {ch.body}
+              </p>
+
+              <div style={{ marginTop: 40 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span className="font-mono-label" style={{ fontSize: "0.55rem", color: "var(--fg-muted)", letterSpacing: "0.12em" }}>BOTTLE FILL</span>
+                  <span className="font-mono-label" style={{ fontSize: "0.55rem", color: `rgba(${glowRgb},0.8)`, letterSpacing: "0.1em" }}>
+                    {Math.round(liquidLevel * 100)}%
+                  </span>
+                </div>
+                <div style={{ height: 1, background: "var(--border)", position: "relative", maxWidth: 200 }}>
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                      width: `${liquidLevel * 100}%`,
+                      height: "100%",
+                      background: `rgba(${glowRgb},0.8)`,
+                      transition: "width 0.6s cubic-bezier(0.22,1,0.36,1), background 1s ease",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginTop: 28, display: "flex", gap: 6, alignItems: "center" }}>
+                {CHAPTERS.map((_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      height: 1,
+                      width: i === chapterIdx ? 24 : 10,
+                      background: i === chapterIdx ? `rgba(${glowRgb},0.8)` : "var(--border)",
+                      transition: "all 0.4s",
+                    }}
+                  />
+                ))}
+                <span className="font-mono-label" style={{ fontSize: "0.52rem", color: "var(--fg-muted)", letterSpacing: "0.1em", marginLeft: 8 }}>
+                  {chapterIdx + 1} / {CHAPTERS.length}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              position: "relative",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                width: "70%",
+                paddingBottom: "120%",
+                borderRadius: "50%",
+                background: `radial-gradient(ellipse, rgba(${glowRgb},${glowOpacity * 0.6}) 0%, transparent 70%)`,
+                transition: "background 1.2s ease",
+                pointerEvents: "none",
+              }}
+            />
+
+            <div style={{ width: "min(320px, 80%)", opacity: bottleOpacity, transition: "opacity 0.5s" }}>
+              <BottleSVG
+                tilt={tilt}
+                liquidLevel={liquidLevel}
+                liquidColorA={liquidColorA}
+                liquidColorB={liquidColorB}
+                glowColor={glowColor}
+                glowOpacity={glowOpacity}
+                rotateY={rotateY}
+                particles={ch.particleType}
+              />
+            </div>
+
+            <div
+              style={{
+                position: "absolute",
+                bottom: 40,
+                left: "50%",
+                transform: "translateX(-50%)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 8,
+                opacity: progress < 0.08 ? (1 - progress / 0.08 * 0.5) : progress < 0.15 ? 0.5 - (progress - 0.08) / 0.07 * 0.5 : 0,
+                transition: "opacity 0.4s",
+              }}
+            >
+              <span className="font-mono-label" style={{ fontSize: "0.52rem", letterSpacing: "0.2em", color: "var(--fg-muted)" }}>SCROLL TO UNFOLD</span>
+              <div style={{ width: 1, height: 36, background: `linear-gradient(to bottom, rgba(${glowRgb},0.4), transparent)` }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Fragrance Notes ─── */
+const fragranceNotes = [
+  {
+    category: "TOP NOTES",
+    notes: [
+      { name: "Black Pepper", origin: "Madagascar", desc: "An opening of sharp spice — electric and immediate, fading fast." },
+      { name: "Bergamot", origin: "Calabria, Italy", desc: "Sun-bright citrus with a smoky undertone, softening the pepper's edge." },
+      { name: "Cardamom", origin: "Guatemala", desc: "Warm aromatic spice that bridges the top to the heart." },
+    ],
+  },
+  {
+    category: "HEART NOTES",
+    notes: [
+      { name: "Midnight Rose", origin: "Bulgaria", desc: "A dark, dewy rose harvested at dusk — more shadow than bloom." },
+      { name: "Oud", origin: "Laos", desc: "Ancient resinous wood of the aquilaria tree. Irreplaceable depth." },
+      { name: "Orris Root", origin: "Tuscany, Italy", desc: "Powdery violet with an earthy, intimate warmth." },
+    ],
+  },
+  {
+    category: "BASE NOTES",
+    notes: [
+      { name: "Vetiver", origin: "Haiti", desc: "Dark rooty earth — the skeleton of the fragrance, lasting for hours." },
+      { name: "Ambergris", origin: "Atlantic Ocean", desc: "Oceanic and warm, a legendary fixative that amplifies every layer." },
+      { name: "Sandalwood", origin: "Mysore, India", desc: "Creamy, warm, and slightly smoky. The softest landing." },
+    ],
+  },
+];
+
+const galleryImages = [
+  { url: "https://images.unsplash.com/photo-1563170351-be82bc888aa4?w=800&h=1000&fit=crop&auto=format", label: "Night Garden", sub: "01 / 06" },
+  { url: "https://images.unsplash.com/photo-1616394584738-fc6e612e71b9?w=800&h=1000&fit=crop&auto=format", label: "Raw Amber", sub: "02 / 06" },
+  { url: "https://images.unsplash.com/photo-1588516903720-8ceb67f9ef84?w=800&h=1000&fit=crop&auto=format", label: "Dark Bloom", sub: "03 / 06" },
+  { url: "https://images.unsplash.com/photo-1528740561583-dc2efbaf9d19?w=800&h=1000&fit=crop&auto=format", label: "Desert Oud", sub: "04 / 06" },
+  { url: "https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?w=800&h=1000&fit=crop&auto=format", label: "Vesper Mist", sub: "05 / 06" },
+  { url: "https://images.unsplash.com/photo-1587017539504-67cfbddac569?w=800&h=1000&fit=crop&auto=format", label: "Stone & Smoke", sub: "06 / 06" },
+];
+
+function useReveal() {
+  useEffect(() => {
+    const els = document.querySelectorAll(".reveal, .reveal-left, .reveal-right");
+    const obs = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            const delay = (e.target as HTMLElement).dataset.delay || "0";
+            setTimeout(() => e.target.classList.add("visible"), parseFloat(delay) * 1000);
+          }
+        });
+      },
+      { threshold: 0.1, rootMargin: "0px 0px -60px 0px" }
+    );
+    els.forEach((el) => obs.observe(el));
+    return () => obs.disconnect();
+  });
+}
+
+/* ─── Testimonials ─── */
+function Testimonials() {
+  return (
+    <section className="py-24 px-8 md:px-16">
+      <div className="max-w-7xl mx-auto">
+        <div className="reveal text-center mb-16">
+          <p className="font-mono-label text-xs mb-4" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>TESTIMONIALS</p>
+          <h2 className="font-display text-3xl md:text-4xl">
+            What Collectors <span className="italic" style={{ color: "var(--gold)" }}>Say</span>
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[
+            { name: "Alexander R.", text: "Noctis is the only fragrance I've ever worn that strangers stop me to ask about. It's mysterious without being aggressive." },
+            { name: "Isabelle M.", text: "I've collected perfumes for 30 years. This is the most complex, evolving scent I've encountered. Worth every euro." },
+            { name: "David C.", text: "The opening pepper, the midnight rose, the dry-down sandalwood — each phase is a chapter. Masterful composition." },
+          ].map((t, i) => (
+            <div key={i} className="reveal p-8" data-delay={`${i * 0.1}`} 
+              style={{ border: "1px solid var(--border)", background: "rgba(201,169,110,0.02)" }}>
+              <p className="font-light italic text-sm leading-relaxed mb-4" style={{ color: "var(--fg-muted)", lineHeight: 1.8 }}>
+                "{t.text}"
+              </p>
+              <p className="font-mono-label text-xs" style={{ color: "var(--gold-dim)", letterSpacing: "0.1em" }}>— {t.name}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Newsletter ─── */
+function Newsletter() {
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (email) {
+      setSubmitted(true);
+      // Demo: Show success message
+      alert(`✨ Thank you for joining the Noctis Circle!\nWe'll keep you updated at: ${email}`);
+      setTimeout(() => setSubmitted(false), 3000);
+      setEmail("");
+    }
+  };
+
+  return (
+    <section className="py-20 px-8 md:px-16" style={{ background: "var(--bg-2)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
+      <div className="max-w-2xl mx-auto text-center">
+        <div className="reveal">
+          <p className="font-mono-label text-xs mb-4" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>NEWSLETTER</p>
+          <h3 className="font-display text-2xl md:text-3xl mb-4">
+            Join the <span className="italic" style={{ color: "var(--gold)" }}>Noctis</span> Circle
+          </h3>
+          <p className="font-light mb-8" style={{ color: "var(--fg-muted)", fontSize: "0.92rem", lineHeight: 1.8 }}>
+            Be the first to know about new releases, private events, and exclusive previews.
+          </p>
+          <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
+            <input 
+              type="email" 
+              placeholder="Enter your email" 
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="flex-1 px-4 py-3 bg-transparent border" 
+              style={{ borderColor: "var(--border)", color: "var(--fg)", outline: "none", fontSize: "0.85rem" }}
+            />
+            <button type="submit" className="btn-ghost" style={{ padding: "0.85rem 2rem" }}>
+              <span>{submitted ? "✓ Joined!" : "Join"}</span>
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Handle Demo Links ─── */
+const handleReserve = () => {
+  alert(`🖤 Thank you for your interest in Noctis!\n\nThis is a demo landing page. The full website with purchase functionality is coming soon.\n\nStay tuned for the official launch!`);
+};
+
+const handleAcquire = () => {
+  alert(`🖤 Noctis — Limited Edition\n\nThis is a demo landing page. The complete website with secure checkout will be available soon.\n\nSign up for the newsletter to get early access!`);
+};
+
+/* ─── Main App ─── */
+export default function App() {
+  const [mouse, setMouse] = useState<MousePos>({ x: -100, y: -100 });
+  const [bottleTilt, setBottleTilt] = useState({ x: 0, y: 0 });
+  const [hovered, setHovered] = useState(false);
+  const [activeNote, setActiveNote] = useState<{ name: string; origin: string; desc: string } | null>(null);
+  const [activeCategory, setActiveCategory] = useState(0);
+  const [scrollPct, setScrollPct] = useState(0);
+  const [navOpen, setNavOpen] = useState(false);
+  const heroRef = useRef<HTMLDivElement>(null);
+
+  useReveal();
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      setMouse({ x: e.clientX, y: e.clientY });
+      if (heroRef.current) {
+        const rect = heroRef.current.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          setBottleTilt({
+            x: (e.clientX - cx) / (rect.width / 2),
+            y: (e.clientY - cy) / (rect.height / 2),
+          });
+        }
+      }
+      const el = e.target as HTMLElement;
+      setHovered(
+        el.tagName === "A" || el.tagName === "BUTTON" ||
+        el.closest("button") !== null || el.closest("a") !== null ||
+        el.closest(".ingredient-node") !== null || el.closest(".gallery-item") !== null
+      );
+    };
+    const onScroll = () => {
+      const doc = document.documentElement;
+      setScrollPct(Math.round(doc.scrollTop / (doc.scrollHeight - doc.clientHeight) * 100));
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("scroll", onScroll); };
+  }, []);
+
+  const scrollTo = useCallback((id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+    setNavOpen(false);
+  }, []);
+
+  return (
+    <div className="grain" style={{ background: "var(--bg)", minHeight: "100vh", color: "var(--fg)" }}>
+      <Cursor pos={mouse} hovered={hovered} />
+
+      {/* Scroll progress */}
+      <div
+        className="fixed top-0 left-0 h-px z-50 transition-all duration-100"
+        style={{ width: `${scrollPct}%`, background: "var(--gold)", opacity: 0.6 }}
+      />
+
+      {/* Floating CTA - Mobile only */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden p-4" 
+        style={{ background: "linear-gradient(to top, rgba(8,8,8,0.98) 0%, rgba(8,8,8,0.9) 100%)", borderTop: "1px solid var(--border)" }}>
+        <button 
+          className="w-full btn-ghost text-center" 
+          style={{ padding: "1rem" }}
+          onClick={handleAcquire}
+        >
+          <span className="text-sm">Pre-Order Noctis — € 420</span>
+        </button>
+      </div>
+
+      {/* Navigation */}
+      <nav
+        className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-8 py-6"
+        style={{ background: "linear-gradient(to bottom, rgba(8,8,8,0.95) 0%, transparent 100%)" }}
+      >
+        <button onClick={() => scrollTo("hero")} className="font-display italic text-lg tracking-wide" style={{ color: "var(--fg)", background: "none", border: "none" }}>
+          Maison Aurore
+        </button>
+        <div className="hidden md:flex items-center gap-10">
+          {[["scroll-story", "Story"], ["notes", "Notes"], ["gallery", "Gallery"], ["craft", "Craft"]].map(([id, label]) => (
+            <button key={id} onClick={() => scrollTo(id)} className="nav-link" style={{ background: "none", border: "none" }}>{label}</button>
+          ))}
+        </div>
+        <button className="btn-ghost hidden md:inline-block" onClick={handleAcquire}><span>Acquire</span></button>
+      </nav>
+
+      {/* ══════════ HERO ══════════ */}
+      <section id="hero" ref={heroRef} className="relative min-h-screen flex items-center overflow-hidden" style={{ paddingTop: 100 }}>
+        <div className="ambient-glow" style={{ width: 600, height: 600, background: "var(--gold)", top: "10%", left: "55%", transform: "translate(-50%,0)" }} />
+        <div className="ambient-glow" style={{ width: 400, height: 400, background: "#602010", top: "50%", left: "20%", opacity: 0.12 }} />
+
+        <div className="relative z-10 w-full grid grid-cols-1 lg:grid-cols-2 gap-0 items-center px-8 md:px-16 lg:px-24">
+          <div className="order-2 lg:order-1 pt-12 lg:pt-0">
+            <div className="reveal" data-delay="0.1">
+              <p className="font-mono-label text-xs tracking-widest mb-6" style={{ color: "var(--gold-dim)" }}>COLLECTION NUIT · No. 7</p>
+            </div>
+            <div className="reveal" data-delay="0.2">
+              <h1 className="font-display leading-none mb-4" style={{ fontSize: "clamp(4rem,10vw,9rem)", color: "var(--fg)" }}>
+                <span className="block">Noc</span>
+                <span className="block italic gold-shimmer" style={{ marginLeft: "clamp(2rem,6vw,6rem)" }}>tis</span>
+              </h1>
+            </div>
+            <div className="reveal" data-delay="0.35">
+              <hr className="hr-gold my-8" style={{ maxWidth: 200 }} />
+              <p className="font-light leading-relaxed mb-10 max-w-xs" style={{ color: "var(--fg-muted)", fontSize: "0.95rem", lineHeight: 1.8 }}>
+                A nocturnal composition born from the silence between midnight and dawn — where black rose, aged oud, and sea ambergris entwine in a fragrance that never quite leaves you.
+              </p>
+            </div>
+            <div className="reveal flex flex-wrap gap-4 items-center" data-delay="0.5">
+              <button className="btn-ghost" onClick={handleAcquire}>
+                <span>Pre-Order Now — € 420</span>
+              </button>
+              <button 
+                className="font-mono-label text-xs" 
+                style={{ color: "var(--fg-muted)", background: "none", border: "none", cursor: "pointer" }}
+                onClick={() => scrollTo("scroll-story")}
+              >
+                Explore Story ↓
+              </button>
+            </div>
+            <div className="reveal mt-16 flex gap-8" data-delay="0.65">
+              {[["94", "Ingredients sourced"], ["12", "Months maceration"], ["23", "Perfumer's award"]].map(([num, label]) => (
+                <div key={label}>
+                  <p className="font-display text-3xl" style={{ color: "var(--gold)" }}>{num}</p>
+                  <p className="font-mono-label text-xs mt-1" style={{ color: "var(--fg-muted)", fontSize: "0.58rem", letterSpacing: "0.1em" }}>{label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="order-1 lg:order-2 flex items-center justify-center" style={{ minHeight: 520 }}>
+            <div style={{ width: "min(340px, 85vw)", position: "relative" }}>
+              <div className="absolute inset-0 rounded-full" style={{ background: "radial-gradient(ellipse, rgba(201,169,110,0.1) 0%, transparent 70%)", transform: "scaleX(1.4)" }} />
+              <BottleSVG tilt={bottleTilt} liquidLevel={0.85} glowOpacity={0.15} rotateY={0} particles="none" />
+              <div style={{ transform: "scaleY(-1) translateY(-8px)", opacity: 0.12, filter: "blur(4px)", pointerEvents: "none" }}>
+                <BottleSVG tilt={{ x: 0, y: 0 }} liquidLevel={0.85} glowOpacity={0.08} rotateY={0} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-3" style={{ opacity: 0.45 }}>
+          <span className="font-mono-label" style={{ fontSize: "0.58rem", letterSpacing: "0.2em", color: "var(--gold-dim)" }}>SCROLL</span>
+          <div style={{ width: 1, height: 60, background: "linear-gradient(to bottom, var(--gold-dim), transparent)" }} />
+        </div>
+      </section>
+
+      <Marquee />
+
+      {/* ══════════ SCROLL STORY ══════════ */}
+      <ScrollStory mouse={mouse} />
+
+      {/* ══════════ FRAGRANCE NOTES ══════════ */}
+      <section id="notes" className="py-32 px-8 md:px-16 lg:px-24" style={{ background: "var(--bg-2)" }}>
+        <div className="max-w-7xl mx-auto">
+          <div className="reveal text-center mb-20">
+            <p className="font-mono-label text-xs mb-4" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>002 — COMPOSITION</p>
+            <h2 className="font-display" style={{ fontSize: "clamp(2.5rem,5vw,4rem)" }}>
+              The <span className="italic" style={{ color: "var(--gold)" }}>Anatomy</span>
+            </h2>
+            <p className="mt-4 max-w-md mx-auto font-light" style={{ color: "var(--fg-muted)", lineHeight: 1.8, fontSize: "0.92rem" }}>
+              Hover each ingredient to reveal its origin and olfactory role.
+            </p>
+          </div>
+
+          <div className="flex justify-center gap-2 mb-16 flex-wrap">
+            {fragranceNotes.map((cat, i) => (
+              <button
+                key={cat.category}
+                onClick={() => setActiveCategory(i)}
+                className="note-pill"
+                style={{ border: "none", cursor: "none", background: i === activeCategory ? "rgba(201,169,110,0.08)" : "transparent", color: i === activeCategory ? "var(--gold-bright)" : "var(--gold-dim)", borderBottom: i === activeCategory ? "1px solid var(--gold-dim)" : "1px solid var(--border)" }}
+              >
+                {cat.category}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {fragranceNotes[activeCategory].notes.map((note, i) => (
+              <div
+                key={note.name}
+                className="ingredient-node p-8 reveal"
+                data-delay={`${i * 0.12}`}
+                onMouseEnter={() => setActiveNote(note)}
+                onMouseLeave={() => setActiveNote(null)}
+                style={{
+                  border: "1px solid",
+                  borderColor: activeNote?.name === note.name ? "var(--gold-dim)" : "var(--border)",
+                  background: activeNote?.name === note.name ? "rgba(201,169,110,0.04)" : "transparent",
+                  transition: "all 0.4s cubic-bezier(0.22,1,0.36,1)",
+                }}
+              >
+                <div className="flex items-start justify-between mb-6">
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: activeNote?.name === note.name ? "var(--gold-bright)" : "var(--gold-dim)", boxShadow: activeNote?.name === note.name ? "0 0 16px var(--gold)" : "none", transition: "all 0.4s", marginTop: 4 }} />
+                  <span className="font-mono-label" style={{ fontSize: "0.55rem", color: "var(--gold-dim)", letterSpacing: "0.15em" }}>{String(i + 1).padStart(2, "0")}</span>
+                </div>
+                <h3 className="font-display text-xl mb-1" style={{ color: "var(--fg)" }}>{note.name}</h3>
+                <p className="font-mono-label mb-4" style={{ fontSize: "0.58rem", color: "var(--gold-dim)", letterSpacing: "0.12em" }}>{note.origin}</p>
+                <p className="font-light leading-relaxed" style={{ color: "var(--fg-muted)", fontSize: "0.85rem", lineHeight: 1.8 }}>{note.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ══════════ GALLERY ══════════ */}
+      <section id="gallery" className="py-32 px-8 md:px-16 lg:px-24">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-end justify-between mb-16">
+            <div className="reveal-left">
+              <p className="font-mono-label text-xs mb-4" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>003 — ATMOSPHERE</p>
+              <h2 className="font-display" style={{ fontSize: "clamp(2.5rem,5vw,4rem)" }}>
+                Visual<br /><span className="italic" style={{ color: "var(--gold)" }}>World</span>
+              </h2>
+            </div>
+            <div className="reveal-right hidden md:block">
+              <p className="font-light text-right max-w-xs" style={{ color: "var(--fg-muted)", fontSize: "0.88rem", lineHeight: 1.8 }}>
+                The world that Noctis inhabits — dark gardens, ancient resins, salt-washed shores.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3" style={{ gridAutoRows: "240px" }}>
+            {galleryImages.map((img, i) => (
+              <div
+                key={img.label}
+                className={`gallery-item reveal`}
+                data-delay={`${i * 0.08}`}
+                style={{ gridRow: (i === 0 || i === 3) ? "span 2" : "span 1" }}
+              >
+                <img src={img.url} alt={img.label} className="w-full h-full object-cover" loading="lazy" />
+                <div className="gallery-overlay" />
+                <div className="absolute bottom-6 left-6 right-6">
+                  <div className="flex items-end justify-between">
+                    <p className="font-display text-lg" style={{ color: "var(--fg)" }}>{img.label}</p>
+                    <p className="font-mono-label" style={{ color: "var(--gold-dim)", fontSize: "0.58rem" }}>{img.sub}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ══════════ CRAFT ══════════ */}
+      <section id="craft" className="py-32 px-8 md:px-16 lg:px-24" style={{ background: "var(--bg-2)" }}>
+        <div className="max-w-7xl mx-auto">
+          <div className="reveal text-center mb-24">
+            <p className="font-mono-label text-xs mb-4" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>004 — PROCESS</p>
+            <h2 className="font-display" style={{ fontSize: "clamp(2.5rem,5vw,4rem)" }}>
+              The Art of<br /><span className="italic gold-shimmer">Making Noctis</span>
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px" style={{ border: "1px solid var(--border)" }}>
+            {[
+              { step: "01", title: "Harvest", text: "Rose petals are gathered at midnight in the Bulgarian Rose Valley during a single week in late May." },
+              { step: "02", title: "Cold Press", text: "Each botanical is cold-pressed or steam-distilled within hours of harvest to preserve the full aromatic spectrum." },
+              { step: "03", title: "Maceration", text: "The accord macerates for exactly twelve months in century-old ceramic vessels before a single drop is tested." },
+              { step: "04", title: "Bottling", text: "Each bottle is hand-filled, numbered, and sealed with a wax stamp by a single artisan at our Grasse atelier." },
+            ].map((item, i) => (
+              <div
+                key={item.step}
+                className="reveal p-10"
+                data-delay={`${i * 0.1}`}
+                style={{ borderRight: i < 3 ? "1px solid var(--border)" : "none" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(201,169,110,0.03)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <p className="font-display text-5xl mb-6" style={{ color: "var(--border)" }}>{item.step}</p>
+                <h3 className="font-display text-xl mb-4" style={{ color: "var(--fg)" }}>{item.title}</h3>
+                <p className="font-light leading-relaxed" style={{ color: "var(--fg-muted)", fontSize: "0.88rem", lineHeight: 1.8 }}>{item.text}</p>
+              </div>
+            ))}
+          </div>
+          <div className="reveal mt-24 text-center max-w-3xl mx-auto" data-delay="0.2">
+            <p className="font-display italic leading-relaxed mb-8" style={{ fontSize: "clamp(1.3rem,2.5vw,1.8rem)", lineHeight: 1.7 }}>
+              "I wanted Noctis to smell like a memory that doesn't belong to you — borrowed, slightly impossible, and entirely unforgettable."
+            </p>
+            <hr className="hr-gold mb-6" style={{ maxWidth: 60, margin: "0 auto 1.5rem" }} />
+            <p className="font-mono-label text-xs" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>
+              ÉLISE VARNAY — MASTER PERFUMER, MAISON AURORE
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ══════════ TESTIMONIALS ══════════ */}
+      <Testimonials />
+
+      {/* ══════════ NEWSLETTER ══════════ */}
+      <Newsletter />
+
+      {/* ══════════ ACQUIRE ══════════ */}
+      <section id="acquire" className="relative py-40 px-8 md:px-16 overflow-hidden">
+        <div className="ambient-glow" style={{ width: 700, height: 700, background: "var(--gold)", top: "50%", left: "50%", transform: "translate(-50%,-50%)", opacity: 0.08 }} />
+        <div className="relative z-10 max-w-2xl mx-auto text-center">
+          <div className="reveal" data-delay="0"><p className="font-mono-label text-xs mb-6" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>005 — ACQUIRE</p></div>
+          <div className="reveal" data-delay="0.1">
+            <h2 className="font-display leading-none mb-8" style={{ fontSize: "clamp(3rem,8vw,7rem)" }}>
+              Own the<br /><span className="italic gold-shimmer">Night</span>
+            </h2>
+          </div>
+          <div className="reveal" data-delay="0.25">
+            <p className="font-light leading-relaxed mb-12" style={{ color: "var(--fg-muted)", lineHeight: 1.9 }}>
+              Noctis is available in a single edition of 2,000 numbered bottles. Once they are gone, the night does not return.
+            </p>
+          </div>
+          <div className="reveal flex flex-col sm:flex-row gap-4 items-center justify-center" data-delay="0.35">
+            <button className="btn-ghost" style={{ padding: "1rem 3rem" }} onClick={handleReserve}>
+              <span>Reserve Your Bottle — € 420</span>
+            </button>
+          </div>
+          <div className="reveal mt-12" data-delay="0.45">
+            <div className="flex justify-center gap-12">
+              {[["1,847", "Reserved"], ["153", "Remaining"]].map(([n, l]) => (
+                <div key={l}>
+                  <p className="font-display text-3xl" style={{ color: "var(--gold)" }}>{n}</p>
+                  <p className="font-mono-label mt-1" style={{ fontSize: "0.58rem", color: "var(--fg-muted)", letterSpacing: "0.12em" }}>{l}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 max-w-xs mx-auto">
+              <div style={{ height: 1, background: "var(--border)", position: "relative" }}>
+                <div style={{ position: "absolute", left: 0, top: 0, width: "92.35%", height: "100%", background: "var(--gold-dim)" }} />
+              </div>
+              <p className="font-mono-label mt-2 text-center" style={{ fontSize: "0.55rem", color: "var(--fg-muted)", letterSpacing: "0.1em" }}>92.35% CLAIMED</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Footer ── */}
+      <footer className="py-16 px-8 md:px-16" style={{ borderTop: "1px solid var(--border)" }}>
+        <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-12 mb-12">
+          <div>
+            <p className="font-display italic text-xl mb-4" style={{ color: "var(--fg)" }}>Maison Aurore</p>
+            <p className="font-light" style={{ color: "var(--fg-muted)", fontSize: "0.85rem", lineHeight: 1.8 }}>Haute parfumerie since 1923.<br />12 Rue des Fleuristes, Grasse.</p>
+          </div>
+          <div>
+            <p className="font-mono-label text-xs mb-4" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>NAVIGATE</p>
+            {["Story", "Notes", "Gallery", "Craft", "Acquire"].map((item) => (
+              <button key={item} onClick={() => scrollTo(item.toLowerCase())} className="block font-light mb-2" style={{ color: "var(--fg-muted)", background: "none", border: "none", fontSize: "0.88rem", textAlign: "left" }}>{item}</button>
+            ))}
+          </div>
+          <div>
+            <p className="font-mono-label text-xs mb-4" style={{ color: "var(--gold-dim)", letterSpacing: "0.2em" }}>CONTACT</p>
+            <p className="font-light" style={{ color: "var(--fg-muted)", fontSize: "0.85rem", lineHeight: 1.8 }}>atelier@maisonaurore.fr<br />+33 4 93 36 15 00</p>
+          </div>
+        </div>
+        <hr className="hr-gold mb-8" />
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+          <p className="font-mono-label text-xs" style={{ color: "var(--fg-muted)", fontSize: "0.58rem", letterSpacing: "0.1em" }}>© 2026 MAISON AURORE. ALL RIGHTS RESERVED.</p>
+          <p className="font-mono-label text-xs" style={{ color: "var(--fg-muted)", fontSize: "0.58rem", letterSpacing: "0.1em" }}>NOCTIS · EAU DE PARFUM · No. 7 · PARIS</p>
+        </div>
+      </footer>
+    </div>
+  );
+}
